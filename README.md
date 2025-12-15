@@ -15,13 +15,10 @@ flowchart TD
 ```
 
 **AI-assisted Linux host triage using high-signal telemetry**
-HostTriageAI performs **point-in-time inspection of a Linux host** and uses an AI model to assess whether there is **anything suspicious that warrants investigation**.
 
-In an ever-changing threat landscape, defenders are no longer just responding to known malware families or static indicators. Attackers increasingly blend into normal system behavior, abuse legitimate tooling, and experiment with AI-assisted tradecraft that does not yet have signatures or names. Traditional detection alone is often insufficient to explain why something matters or what to do next.
+Modern attackers blend into normal system behavior, abuse legitimate tools, and leverage AI-assisted techniques that lack signatures or clear classification. Traditional detection often fails to explain why activity matters or what action to take.
 
-This project is designed to bridge that gap. It combines deterministic, policy-driven detection for high-confidence kill-chain events with analyst-grade AI reasoning that explains context, prioritizes risk, and provides concrete investigation steps. Rather than replacing security judgment, it augments it — turning raw host telemetry into actionable incident response insight, even for novel or previously unseen techniques.
-
-The result is faster triage, clearer escalation decisions, and better outcomes when facing both familiar threats and emerging, hard-to-classify attack behaviors.
+This project combines deterministic, policy-driven detection with analyst-grade AI reasoning to turn raw host telemetry into actionable incident response insight — enabling faster triage, clearer escalation, and more effective response to both known and emerging threats.
 
 HostTriageAI helps by:
 - Collecting **high-value, low-volume telemetry**
