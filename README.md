@@ -86,7 +86,7 @@ All collectors run independently.
 
 ### Privilege
 - UID 0 users
-- sudoers and sudoers.d file hashes
+- sudoers and sudoers.d
 
 ### Artifacts
 - Executable files in `/tmp` and `/dev/shm`
