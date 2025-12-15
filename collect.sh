@@ -15,8 +15,6 @@ outbound_shells="$(ss -tunp state established 2>/dev/null \
   | egrep -i 'bash|sh|python|perl|ruby|nc|socat|php' \
   | head -n 200 || true)"
 
-
-
 # ---------------- PROCESSES ----------------
 
 processes="$(ps -eo user:20,pid,ppid,etimes,comm,args --no-headers 2>/dev/null \
@@ -81,11 +79,20 @@ initd_list="$(ls -1 /etc/init.d 2>/dev/null | head -n 200 || true)"
 
 uid0_users="$(awk -F: '$3==0 {print $1":"$6":"$7}' /etc/passwd 2>/dev/null || true)"
 
-sudoers_hashes="$(
-  (
-    sha256sum /etc/sudoers 2>/dev/null
-    find /etc/sudoers.d -type f -maxdepth 1 -exec sha256sum {} \; 2>/dev/null
-  ) | head -n 200 || true
+# --- sudoers: recent changes + risky rules (REPLACEMENT) ---
+
+sudoers_recent_changes="$(
+  find /etc/sudoers /etc/sudoers.d \
+    -maxdepth 1 -type f -mmin -120 2>/dev/null \
+    -exec stat -c '%y|%n' {} \; || true
+)"
+
+sudoers_recent_rules="$(
+  find /etc/sudoers /etc/sudoers.d \
+    -maxdepth 1 -type f -mmin -120 2>/dev/null \
+    -exec grep -HnE \
+      'NOPASSWD|!authenticate|ALL=\(ALL(:ALL)?\)[[:space:]]+ALL' {} \; \
+    2>/dev/null || true
 )"
 
 # ---------------- AUTHENTICATION (IR-CRITICAL) ----------------
@@ -148,7 +155,8 @@ jq -n \
   --arg rc_local_meta "$rc_local_meta" \
   --arg initd_list "$initd_list" \
   --arg uid0_users "$uid0_users" \
-  --arg sudoers_hashes "$sudoers_hashes" \
+  --arg sudoers_recent_changes "$sudoers_recent_changes" \
+  --arg sudoers_recent_rules "$sudoers_recent_rules" \
   --arg last_logins "$last_logins" \
   --arg failed_logins "$failed_logins" \
   --arg sudo_usage "$sudo_usage" \
@@ -171,7 +179,6 @@ jq -n \
     serviceish: $pkg_top
   },
   processes: $processes,
-#  listeners: $listeners,
   network_activity: {
     listeners: $listeners,
     established_connections: $outbound_conns,
@@ -186,7 +193,8 @@ jq -n \
   },
   privilege: {
     uid0_users: $uid0_users,
-    sudoers_hashes: $sudoers_hashes
+    sudoers_recent_changes: $sudoers_recent_changes,
+    sudoers_recent_rules: $sudoers_recent_rules
   },
   authentication: {
     last_logins: $last_logins,

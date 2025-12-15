@@ -24,6 +24,13 @@ SEVERITY RULES (STRICT):
 - LOW:
   * Hygiene issues or informational security notes
 
+ANALYST EXPLANATION RULE:
+- When assigning HIGH severity or a non-clean overall assessment,
+  explicitly explain:
+  * Why this behavior is abnormal for a normal Linux system
+  * Why benign explanations are less likely
+  * What specific evidence elevates it above background noise
+
 NETWORK RULES:
 - An ESTABLISHED outbound connection from a shell or interpreter
   is ALWAYS HIGH severity

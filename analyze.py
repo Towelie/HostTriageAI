@@ -50,14 +50,16 @@ def extract_json_from_text(text: str) -> Dict[str, Any]:
     try:
         return json.loads(text)
     except json.JSONDecodeError:
-        # Recovery: find the first {...} block
         m = re.search(r"\{.*\}", text, flags=re.DOTALL)
         if not m:
             raise
         return json.loads(m.group(0))
 
 
-SHELL_PROC_RE = re.compile(r'users:\(\("?(sh|bash|dash|zsh|ksh|python|python3|perl|ruby|php|nc|ncat|netcat|socat)"?', re.I)
+SHELL_PROC_RE = re.compile(
+    r'users:\(\("?(sh|bash|dash|zsh|ksh|python|python3|perl|ruby|php|nc|ncat|netcat|socat)"?',
+    re.I
+)
 
 
 def detect_reverse_shell(facts: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -70,39 +72,40 @@ def detect_reverse_shell(facts: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     shell_like = (net.get("shell_like_outbound") or "").strip()
     established = (net.get("established_connections") or "").strip()
 
-    # Strong signal: explicit shell_like_outbound field populated
     if shell_like:
-        evidence = shell_like
         return {
             "severity": "high",
             "category": "network",
-            "evidence": evidence,
+            "evidence": shell_like,
             "reasoning": (
-                "Established outbound connection owned by an interactive shell/interpreter "
-                "(sh/bash/python/nc/socat/etc). This matches reverse shell / live C2 tradecraft "
-                "and should be treated as active compromise until disproven."
+                "An established outbound network connection is owned directly by a shell or interpreter "
+                "process (e.g., sh/bash/python/nc/socat). Interactive shells do not normally initiate or "
+                "maintain persistent outbound TCP connections. The presence of active stdin/stdout file "
+                "descriptors further aligns with reverse shell or live command-and-control tradecraft, "
+                "making benign explanations unlikely without additional context."
             ),
             "recommended_next_step": (
                 "1) Identify PID and parent: ps -fp <pid>; ps -o pid,ppid,user,etime,cmd -p <pid>\n"
                 "2) Inspect process tree: pstree -asp <pid>\n"
                 "3) Inspect /proc: readlink -f /proc/<pid>/exe; tr '\\0' ' ' < /proc/<pid>/cmdline\n"
-                "4) Confirm remote: ss -tunp | grep <pid>\n"
-                "5) Contain: isolate network or kill -STOP <pid> (preserve forensics) then image if needed"
+                "4) Confirm remote endpoint: ss -tunp | grep <pid>\n"
+                "5) Contain: isolate network or kill -STOP <pid> (preserve forensics), then acquire memory/disk"
             )
         }
 
-    # Backup: parse established_connections for shell-ish ownership if shell_like_outbound was empty
     if established and SHELL_PROC_RE.search(established):
         return {
             "severity": "high",
             "category": "network",
             "evidence": established,
             "reasoning": (
-                "Established outbound connection appears to be owned by a shell/interpreter. "
-                "Treat as probable reverse shell / live C2 until proven benign."
+                "Established outbound network traffic appears to be associated with a shell or interpreter "
+                "process. Shell-owned network connections are atypical in normal system operation and are "
+                "commonly associated with reverse shells or interactive command-and-control channels."
             ),
             "recommended_next_step": (
-                "Extract PID from ss output and follow the same triage steps: ps/pstree/proc/containment."
+                "Extract PID from ss output and perform standard reverse-shell triage "
+                "(process tree, /proc inspection, containment)."
             )
         }
 
@@ -110,18 +113,13 @@ def detect_reverse_shell(facts: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
 
 def build_prompt(facts: Dict[str, Any], analyst_prompt_path: str = "analyst_prompt.txt") -> str:
-    """
-    We send the analyst prompt (from file) plus a compact instruction to focus on the data.
-    """
     base = read_text(analyst_prompt_path)
     if not base:
-        # Fallback (shouldn't happen in your repo, but safe)
         base = (
             "You are a senior Linux IR analyst. Output strictly JSON. "
-            "Focus on suspicious activity, persistence, auth, live network."
+            "Focus on suspicious activity, persistence, authentication, and live network indicators."
         )
 
-    # Important: ensure the model sees network_activity explicitly.
     return (
         base
         + "\n\n"
@@ -139,10 +137,8 @@ def main() -> int:
         print(f"Usage: {sys.argv[0]} <facts.json>", file=sys.stderr)
         return 2
 
-    facts_path = sys.argv[1]
-    facts = load_json(facts_path)
+    facts = load_json(sys.argv[1])
 
-    # Deterministic gate (before AI)
     forced = detect_reverse_shell(facts)
 
     client = OpenAI(
@@ -150,16 +146,11 @@ def main() -> int:
         base_url=os.getenv("OPENAI_BASE_URL", None) or None
     )
 
-    model = DEFAULT_MODEL
-
     system_prompt = build_prompt(facts)
-
-    # Send the full facts JSON (not chunked) — your collector is already trimmed.
     user_content = json.dumps(facts, indent=2, ensure_ascii=False)
 
-    # Call Responses API (no response_format param; your SDK rejected it)
     resp = client.responses.create(
-        model=model,
+        model=DEFAULT_MODEL,
         input=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_content},
@@ -173,57 +164,31 @@ def main() -> int:
 
     ai_out = extract_json_from_text(text)
 
-    # Normalize output shape: your prompt should enforce these keys, but models can drift.
-    # We'll preserve whatever it returned, but inject forced findings and override verdict if needed.
     if "findings" not in ai_out or not isinstance(ai_out.get("findings"), list):
         ai_out["findings"] = []
 
-    # If forced reverse shell exists, insert it at top and override assessment fields if present.
     if forced:
         ai_out["findings"] = [forced] + ai_out["findings"]
+        ai_out["overall_assessment"] = "likely_compromised"
+        ai_out["confidence"] = max(float(ai_out.get("confidence", 0.0)), 0.90)
 
-        # Prefer your newer schema if present
-        if "overall_assessment" in ai_out:
-            ai_out["overall_assessment"] = "likely_compromised"
-        else:
-            # Backward compatible: add fields even if model didn't
-            ai_out.setdefault("overall_assessment", "likely_compromised")
-
-        # Confidence normalization
-        if "confidence" in ai_out:
-            try:
-                # if 0-1 float
-                if isinstance(ai_out["confidence"], (int, float)):
-                    ai_out["confidence"] = max(float(ai_out["confidence"]), 0.90)
-                # if 0-100 int
-                elif isinstance(ai_out["confidence"], str) and ai_out["confidence"].isdigit():
-                    ai_out["confidence"] = str(max(int(ai_out["confidence"]), 90))
-            except Exception:
-                ai_out["confidence"] = 0.90
-        else:
-            ai_out["confidence"] = 0.90
-
-        # Also add a short top-level flag if your model returns older schema
         ai_out.setdefault("verdict", {})
         if isinstance(ai_out["verdict"], dict):
             ai_out["verdict"]["suspicious"] = True
-            ai_out["verdict"]["why"] = "Shell-like established outbound connection detected (probable reverse shell)."
+            ai_out["verdict"]["why"] = (
+                "The system exhibits an active, established outbound TCP connection owned directly by a "
+                "shell interpreter process. Shells do not normally maintain persistent network connections, "
+                "particularly to non-standard ports, and the presence of interactive file descriptors "
+                "strongly suggests remote interactive control. This pattern aligns closely with reverse "
+                "shell or live command-and-control activity and should be treated as active compromise "
+                "until a benign explanation is conclusively verified."
+            )
 
-
-    if forced:
-        # When a forced primary network compromise exists (e.g. reverse shell),
-        # discard ALL model-generated network findings to prevent duplication.
         ai_out["findings"] = [
-            f for f in ai_out.get("findings", [])
-            if f.get("category") != "network"
+            f for f in ai_out["findings"] if f.get("category") != "network"
         ]
-
-        # Insert the forced finding as the single authoritative network indicator
         ai_out["findings"].insert(0, forced)
 
-
-
-    # Print final
     print(json.dumps(ai_out, indent=2, ensure_ascii=False))
     return 0
 
