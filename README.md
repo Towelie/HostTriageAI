@@ -9,12 +9,13 @@ The tool is designed to support **incident response and security triage**, not c
 ---
 
 ## What problem this solves
+In an ever-changing threat landscape, defenders are no longer just responding to known malware families or static indicators. Attackers increasingly blend into normal system behavior, abuse legitimate tooling, and experiment with AI-assisted tradecraft that does not yet have signatures or names. Traditional detection alone is often insufficient to explain why something matters or what to do next.
 
-During investigations, responders often need to answer a simple but critical question quickly:
+This project is designed to bridge that gap. It combines deterministic, policy-driven detection for high-confidence kill-chain events with analyst-grade AI reasoning that explains context, prioritizes risk, and provides concrete investigation steps. Rather than replacing security judgment, it augments it — turning raw host telemetry into actionable incident response insight, even for novel or previously unseen techniques.
 
-> **Does this host show signs of compromise or unsafe behavior right now?**
+The result is faster triage, clearer escalation decisions, and better outcomes when facing both familiar threats and emerging, hard-to-classify attack behaviors.
 
-HostTriageAI helps answer that question by:
+HostTriageAI helps by:
 - Collecting **high-value, low-volume telemetry**
 - Inferring a **likely baseline** for the host
 - Highlighting **deviations that matter for IR**
