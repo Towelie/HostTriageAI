@@ -10,6 +10,12 @@ uptime_s="$(cut -d. -f1 /proc/uptime 2>/dev/null || echo "")"
 # ---------------- NETWORK ----------------
 
 listeners="$(ss -tulpen 2>/dev/null | head -n 200 || true)"
+outbound_conns="$(ss -tunp state established 2>/dev/null | head -n 200 || true)"
+outbound_shells="$(ss -tunp state established 2>/dev/null \
+  | egrep -i 'bash|sh|python|perl|ruby|nc|socat|php' \
+  | head -n 200 || true)"
+
+
 
 # ---------------- PROCESSES ----------------
 
@@ -134,6 +140,8 @@ jq -n \
   --arg uptime_s "$uptime_s" \
   --arg listeners "$listeners" \
   --arg processes "$processes" \
+  --arg outbound_conns "$outbound_conns" \
+  --arg outbound_shells "$outbound_shells" \
   --arg etc_cron "$etc_cron" \
   --arg user_cron "$user_cron" \
   --arg cron_exec_details "$cron_exec_details" \
@@ -163,7 +171,12 @@ jq -n \
     serviceish: $pkg_top
   },
   processes: $processes,
-  listeners: $listeners,
+#  listeners: $listeners,
+  network_activity: {
+    listeners: $listeners,
+    established_connections: $outbound_conns,
+    shell_like_outbound: $outbound_shells
+  },
   persistence: {
     etc_cron: $etc_cron,
     user_cron: $user_cron,
