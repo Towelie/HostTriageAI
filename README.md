@@ -86,7 +86,7 @@ All collectors run independently.
 
 ### Privilege
 - UID 0 users
-- sudoers and sudoers.d file hashes
+- sudoers and sudoers.d
 
 ### Artifacts
 - Executable files in `/tmp` and `/dev/shm`
@@ -212,11 +212,8 @@ No memory analysis, no forensic timelines, no lateral movement attribution.
 
 ---
 
-### Developer workstation and WSL inspection
+### Persistence & Remote Access
 - Identify misuse of:
-  - WSL instances
-  - Developer machines running server-like services
-- Detect:
   - Unsafe persistence
   - Reverse shells
   - Execution from mounted external filesystems
