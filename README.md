@@ -6,7 +6,7 @@ HostTriageAI collects high-value, low-volume telemetry from a Linux host and sub
 
 > **Is there anything suspicious on this host right now?**
 
-It is built for **incident response and threat triage**, not compliance, asset inventory, or generic hardening.
+It is designed for **incident response, threat triage, and hostile-environment validation**, not compliance, asset inventory, or generic hardening.
 
 ---
 
@@ -26,86 +26,88 @@ flowchart TD
     D --> E
 ```
 
-**Parallel collectors include**: processes, network activity, persistence mechanisms, authentication activity, privilege state, and suspicious artifacts.
-
-The diagram reflects the real flow while avoiding unnecessary visual complexity.
+All collectors run independently.  
+**Normalization and chunking happen after collection for all signals**, not just “high-risk” ones.
 
 ---
 
 ## Design goals
 
-- **High signal, low volume**  
-  No full filesystem walks and no bulk log ingestion.
+- **High signal, low volume**
+  Focus on telemetry attackers cannot easily hide.
 
-- **IR-first focus**  
+- **IR-first**
   Persistence, execution, privilege, authentication, and network activity take priority.
 
-- **Baseline inferred, not assumed**  
-  The AI infers what normal should look like for the host and context.
+- **Baseline inferred, not assumed**
+  The AI infers what *normal* looks like for the host and context.
 
-- **Human-verifiable output**  
-  Every finding includes evidence, reasoning, and concrete next steps.
+- **Human-verifiable**
+  Every finding includes raw evidence, reasoning, and concrete next steps.
 
 ---
 
 ## What is collected
 
 ### Execution and runtime
-- Root processes
+- Root-owned processes
 - Long-lived processes
-- Network sockets with owning process
+- Process-backed network sockets
+
+### Network
+- Listening sockets
+- Established connections with owning PID and FD context
 
 ### Persistence
-- System cron and cron directories
+- System crontab and cron directories
 - User crontabs
 - init.d scripts
-- rc.local
+- rc.local metadata
 
 ### Authentication and access
 - Last successful logins
 - Failed authentication attempts
-- Successful SSH logins
-- Current interactive sessions
-- SSH daemon authentication configuration
-- Authorized SSH keys metadata
+- SSH login history
+- Active sessions
+- SSH daemon configuration
+- Authorized SSH key metadata
 
 ### Privilege
-- UID 0 accounts
-- Sudoers file hashes
+- UID 0 users
+- sudoers and sudoers.d hashes
 
 ### Artifacts
-- Executable files in tmp and dev shm
-- Common writable staging locations
+- Executable files in `/tmp` and `/dev/shm`
+- Common attacker staging locations
 
 ---
 
 ## What this tool is not
 
-- Not a compliance scanner  
 - Not a vulnerability scanner  
-- Not a full EDR replacement  
+- Not a compliance scanner  
+- Not an EDR replacement  
 - Not a trust-based auditor  
 
-HostTriageAI assumes the host **may already be compromised**.
+HostTriageAI **assumes compromise is possible** until evidence says otherwise.
 
 ---
 
-## Example finding (high-confidence suspicious)
+## Example finding (high severity)
 
-The following is a **sanitized example** of a finding that should be treated as **active compromise until disproven**.
+The example below is **intentionally realistic** and uses the **exact output structure** produced by the analyzer.  
+Sensitive identifiers are redacted.
 
 ```json
 {
-  "severity": "high",
-  "category": "network",
-  "evidence": "Established outbound TCP connection owned by an interactive shell process with STDIN and STDOUT attached",
-  "reasoning": "An established outbound network connection directly owned by an interactive shell or interpreter is not normal for baseline Linux operation. This pattern strongly matches reverse shell or live command and control tradecraft and should be treated as an active compromise until conclusively disproven.",
-  "recommended_next_step": [
-    "Identify the process and its parent to determine execution origin",
-    "Inspect the process tree to confirm interactive control",
-    "Examine proc metadata to identify the executable and invocation context",
-    "Validate the remote endpoint and scope of exposure",
-    "Contain the process by isolating the host or pausing execution while preserving forensic evidence"
+  "findings": [
+    {
+      "severity": "high",
+      "category": "network",
+      "evidence": "tcp     0        0           local_host:55742     remote_host:9003   users:((\"sh\",pid=1490,fd=2),(\"sh\",pid=1490,fd=1),(\"sh\",pid=1490,fd=0))",
+      "reasoning": "Established outbound connection owned by an interactive shell/interpreter (sh/bash/python/nc/socat/etc). This matches reverse shell / live C2 tradecraft and should be treated as active compromise until disproven.",
+      "recommended_next_step": "1) Identify PID and parent: ps -fp <pid>; ps -o pid,ppid,user,etime,cmd -p <pid>\n2) Inspect process tree: pstree -asp <pid>\n3) Inspect /proc: readlink -f /proc/<pid>/exe; tr '\\0' ' ' < /proc/<pid>/cmdline\n4) Confirm remote: ss -tunp | grep <pid>\n5) Contain: isolate network or kill -STOP <pid> (preserve forensics) then image if needed"
+    }
   ]
 }
 ```
@@ -128,4 +130,4 @@ This class of finding should **override benign assumptions** and trigger immedia
 
 > **Do not collect everything. Collect what attackers cannot hide.**
 
-HostTriageAI is designed to surface meaningful deviations and high-confidence threat signals without drowning analysts in noise.
+HostTriageAI is designed to surface **meaningful deviations** and **high-confidence threat signals** without drowning analysts in noise.
