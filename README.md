@@ -1,160 +1,227 @@
-# linux-ai-host-anomaly
+# Linux AI Host Anomaly Detection
 
-Minimal, IR-focused host triage for Linux systems using AI-assisted analysis.
+A lightweight Linux host telemetry collector and AI-assisted analyzer designed for **incident response (IR) triage** and **post-compromise validation**.
 
-This project collects high-signal host telemetry from a Linux system and submits it to an AI model to answer one question:
+This project combines **deterministic, code-enforced compromise detection** with **AI-assisted contextual analysis** to help analysts answer one core question quickly and accurately:
 
-Is there anything suspicious on this host right now?
-
-It is designed for incident response, threat hunting, and first-hour triage — not compliance, asset inventory, or long-term monitoring.
+> “Is this host showing signs of active or likely compromise, and why?”
 
 ---
 
-DESIGN GOALS
+## Design Goals
 
-- High signal, low volume
-- Fast to run on a live system
-- No systemd dependency
-- No operator-defined baseline required
-- AI infers expected baseline per distro and environment
-- Output optimized for IR decision-making
+- **Detection correctness over verbosity**  
+  The tool prioritizes signals that reliably indicate compromise or attacker control.
 
-This tool is meant to augment a human IR analyst, not replace one.
+- **Clear separation of authority**  
+  Detection logic is enforced in code.  
+  The AI provides interpretation and context, not verdict authority.
+
+- **Incident response–first perspective**  
+  Output is structured for analysts, not dashboards.
+
+- **Minimal assumptions about the environment**  
+  No `systemd` dependency. Works on servers, containers, WSL, and minimal Linux installs.
 
 ---
 
-WHAT IT COLLECTS (HIGH-VALUE ONLY)
+## What the Tool Actively Detects
 
-The collector intentionally avoids log firehoses and focuses on attacker tradecraft.
+The analyzer distinguishes between **authoritative compromise indicators** and **contextual risk indicators**.
 
-Persistence
+### Authoritative Compromise Indicators (Code-Enforced)
+
+These signals are evaluated deterministically and **cannot be downgraded or ignored by the AI**:
+
+- **Established outbound network connections owned by interactive shells or interpreters**
+  - Examples: `sh`, `bash`, `python`, `perl`, `ruby`, `php`, `nc`, `socat`
+  - Indicates live command execution or control channel
+- **Shell-owned outbound TCP sessions**
+  - Strong indicator of reverse shells or active C2
+- **Interpreter processes with live network control paths**
+  - Suggests attacker-driven execution rather than passive tooling
+
+If any of the above are present, the host is treated as **actively compromised until disproven**.
+
+---
+
+### Contextual Risk Indicators (AI-Assessed)
+
+These signals are **not inherently malicious**, but are relevant for understanding persistence, staging, or attack surface:
+
+- **Persistence mechanisms**
+  - User and system cron jobs
+  - `init.d` services
+  - `rc.local` presence or modification
+- **Filesystem artifacts**
+  - Executable files in `/tmp` or `/dev/shm`
+  - World-writable or user-owned executables in transient directories
+- **Process characteristics**
+  - Long-lived user processes
+  - Root-owned services with unusual arguments
+- **Privilege and access**
+  - UID 0 users
+  - Sudoers configuration and overrides
+- **Installed software profile**
+  - Presence of service-oriented packages (SSH, Docker, databases, web servers)
+- **System role indicators**
+  - Developer tooling
+  - Data science or ML environments
+  - Server-like vs workstation-like behavior
+
+These are evaluated with calibrated severity and used to provide investigative context.
+
+---
+
+## Severity Model
+
+Severity is intentionally conservative and proportional:
+
+- **HIGH**
+  - Live control paths (shell/interpreter network connections)
+  - Active compromise indicators
+- **MEDIUM**
+  - Persistence mechanisms
+  - Suspicious staging locations
+  - Potential footholds not directly tied to live control
+- **LOW**
+  - Hygiene issues
+  - Informational observations
+  - Environment characterization
+
+The analyzer avoids severity inflation and duplicate findings.
+
+---
+
+## Architecture Overview
+
+```
+collect.sh
+  - Gathers high-signal host telemetry
+  - Outputs a single compact JSON document
+
+analyze.py
+  - Enforces deterministic compromise detection
+  - Calls an LLM for contextual analysis
+  - Deduplicates findings and calibrates severity
+  - Produces IR-grade JSON output
+```
+
+---
+
+## Collected Telemetry
+
+The collector intentionally limits scope to high-value artifacts:
+
+- OS, kernel, uptime
+- Running processes (root + long-lived)
+- Network listeners
+- Established outbound network connections
+- Shell-owned outbound connections (explicitly flagged)
 - System and user cron jobs
-- Cron execution targets (path, hash, file head)
-- rc.local metadata
-- /etc/init.d service inventory
+- `init.d` services and `rc.local`
+- UID 0 users and sudoers hashes
+- Executable artifacts in `/tmp` and `/dev/shm`
+- Package inventory summary (service-oriented focus)
 
-Authentication and Access
-- Last successful logins
-- Recent failed SSH attempts
-- Recent sudo usage
-- Risky SSH daemon configuration
-- wtmp metadata (anti-forensics check)
-
-Execution
-- Root and long-lived processes
-- Executables in /tmp and /dev/shm
-- Cross-boundary execution (/mnt, /tmp, /dev/shm)
-
-Network Exposure
-- Active listening sockets with process context
-
-Privilege
-- UID 0 users
-- sudoers integrity via file hashes
-
-Software Context
-- Package manager type
-- Package count
-- Service-relevant packages only
+No full filesystem scans. No verbose logs.
 
 ---
 
-REPOSITORY STRUCTURE
+## Output Format
 
-.
-  collect.sh          Host telemetry collector (bash)
-  analyze.py          AI analyzer and verdict engine
-  requirements.txt    Python dependencies
-  .env                Local AI configuration (NOT committed)
-  .gitignore
-  README.md
+The analyzer emits **strict JSON** suitable for IR workflows.
+
+### Sanitized Example Finding
+
+```json
+{
+  "severity": "high",
+  "category": "network",
+  "evidence": "tcp ESTAB local_host:54321 → remote_host:9003 users:((\"sh\",pid=XXXX))",
+  "reasoning": "Established outbound connection owned by an interactive shell indicates a live control channel consistent with reverse shell or command-and-control tradecraft.",
+  "recommended_next_step": "Identify the shell process and its parent, inspect process lineage, confirm the remote endpoint, and isolate the host."
+}
+```
+
+### Example Overall Structure
+
+```json
+{
+  "overall_assessment": "likely_compromised",
+  "confidence": 0.95,
+  "context_summary": [
+    "Host appears to be a developer workstation",
+    "No exposed server-style listeners detected",
+    "Python tooling and mounted filesystem usage observed"
+  ],
+  "high_risk_indicators": [
+    "Shell-owned outbound network connection"
+  ],
+  "findings": []
+}
+```
 
 ---
 
-REQUIREMENTS
+## Usage
 
-System
-- Linux (tested on Ubuntu and Debian)
-- bash
-- jq
-- ps, ss, last, grep, awk
-- Read access to /var/log/auth.log
+Collect telemetry:
 
-Python
-- Python 3.9 or newer
-- Internet access to OpenAI API
+```bash
+./collect.sh /var/tmp/ai_host_facts.json
+```
+
+Analyze:
+
+```bash
+python3 analyze.py /var/tmp/ai_host_facts.json
+```
 
 ---
 
-SETUP
+## Configuration
 
-1. Install Python dependencies
+Create a `.env` file:
 
-pip3 install -r requirements.txt
+```
+OPENAI_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxx
+```
 
-2. Create AI configuration file
+Optional:
 
-Create a file named .env in the repository root with the following content:
-
-OPENAI_API_KEY=sk-REPLACE_ME
-
-Optional settings (defaults are fine):
-
+```
 OPENAI_MODEL=gpt-4.1-mini
 OPENAI_BASE_URL=https://api.openai.com/v1
+```
 
 ---
 
-USAGE
+## Intended Use Cases
 
-Manual run (recommended for IR triage)
-
-From the repository directory:
-
-bash collect.sh ./host_facts.json
-python3 analyze.py ./host_facts.json
-
-The analyzer outputs structured JSON containing:
-- A clear suspicious or not verdict
-- Confidence score
-- Top findings ranked by IR relevance
-- Concrete next investigation steps
+- Incident response triage
+- Validation of suspected host compromise
+- Developer workstation investigations
+- WSL and container environment analysis
+- Post-breach host assessment
 
 ---
 
-OPERATIONAL NOTES
+## Disclaimer
 
-- Safe to run on live systems
-- No system modifications are made
-- Data volume is intentionally small
-- Output is suitable for tickets or reports
-- Collected JSON files contain sensitive host data and must be handled securely
+This tool is provided for defensive security and incident response purposes only.  
+All findings should be validated through additional investigation.
 
 ---
 
-LIMITATIONS
+## License
 
-- Not a replacement for full forensic acquisition
-- Accuracy depends on local log availability
-- AI output must always be reviewed by a human analyst
+GNU General Public License v3.0 (GPL-3.0)
 
 ---
 
-INTENDED USE
+## Project Status
 
-Intended for:
-- Incident responders
-- Threat hunters
-- SOC escalation triage
-- Rapid host suspicion assessment
+Active development with emphasis on detection correctness, analyst usability, and disciplined severity handling.
 
-Not intended for:
-- Compliance auditing
-- Asset inventory
-- Continuous monitoring
-
----
-
-LICENSE
-
-Use at your own risk. No warranty expressed or implied.
+Security-focused feedback and contributions are welcome.
