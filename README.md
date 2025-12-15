@@ -1,216 +1,104 @@
-# Linux AI Host Anomaly Detection
+# HostTriageAI
 
-A lightweight Linux host telemetry collector and AI-assisted analyzer designed for **incident response (IR) triage** and **post-compromise validation**.
+HostTriageAI is an AI-assisted Linux host forensic triage tool designed to help incident responders quickly determine whether a system shows signs of active or latent compromise.
 
-This project combines **deterministic, code-enforced compromise detection** with **AI-assisted contextual analysis** to help analysts answer one core question quickly and accurately:
+Rather than acting as a scanner or EDR, HostTriageAI collects high-signal host telemetry (processes, network activity, persistence mechanisms, privilege indicators) and uses an LLM as an analyst to reason about control, exposure, and suspicious behavior in context.
 
-> “Is this host showing signs of active or likely compromise, and why?”
-
----
-
-## Design Goals
-
-- **Detection correctness over verbosity**  
-  The tool prioritizes signals that reliably indicate compromise or attacker control.
-
-- **Clear separation of authority**  
-  Detection logic is enforced in code.  
-  The AI provides interpretation and context, not verdict authority.
-
-- **Incident response–first perspective**  
-  Output is structured for analysts, not dashboards.
-
-- **Minimal assumptions about the environment**  
-  No `systemd` dependency. Works on servers, containers, WSL, and minimal Linux installs.
+The goal is not alert volume, but clear, defensible host-level judgments that help analysts decide what to escalate.
 
 ---
 
-## What the Tool Actively Detects
+## What HostTriageAI Is (and Is Not)
 
-The analyzer distinguishes between **authoritative compromise indicators** and **contextual risk indicators**.
+HostTriageAI is:
+- A host-level forensic triage assistant
+- Focused on post-access and live control detection
+- Opinionated about severity and analyst usefulness
+- Designed for Linux, WSL, and container-adjacent environments
 
-### Authoritative Compromise Indicators (Code-Enforced)
-
-These signals are evaluated deterministically and **cannot be downgraded or ignored by the AI**:
-
-- **Established outbound network connections owned by interactive shells or interpreters**
-  - Examples: `sh`, `bash`, `python`, `perl`, `ruby`, `php`, `nc`, `socat`
-  - Indicates live command execution or control channel
-- **Shell-owned outbound TCP sessions**
-  - Strong indicator of reverse shells or active C2
-- **Interpreter processes with live network control paths**
-  - Suggests attacker-driven execution rather than passive tooling
-
-If any of the above are present, the host is treated as **actively compromised until disproven**.
+HostTriageAI is not:
+- An EDR or prevention tool
+- A replacement for full forensic acquisition
+- A signature-based scanner
+- A real-time monitoring agent
 
 ---
 
-### Contextual Risk Indicators (AI-Assessed)
+## How It Works
 
-These signals are **not inherently malicious**, but are relevant for understanding persistence, staging, or attack surface:
+1. A lightweight collector gathers high-value, low-noise host data:
+   - Processes (with privilege and longevity context)
+   - Network listeners and established outbound connections
+   - Shell- and interpreter-owned network activity
+   - Persistence mechanisms (cron, init scripts, rc.local)
+   - Privilege indicators (UID 0 users, sudoers state)
+   - Suspicious artifacts in writable locations (e.g. /tmp, /dev/shm)
+   - Authentication signals (successful and failed SSH activity)
 
-- **Persistence mechanisms**
-  - User and system cron jobs
-  - `init.d` services
-  - `rc.local` presence or modification
-- **Filesystem artifacts**
-  - Executable files in `/tmp` or `/dev/shm`
-  - World-writable or user-owned executables in transient directories
-- **Process characteristics**
-  - Long-lived user processes
-  - Root-owned services with unusual arguments
-- **Privilege and access**
-  - UID 0 users
-  - Sudoers configuration and overrides
-- **Installed software profile**
-  - Presence of service-oriented packages (SSH, Docker, databases, web servers)
-- **System role indicators**
-  - Developer tooling
-  - Data science or ML environments
-  - Server-like vs workstation-like behavior
+2. The collected facts are passed to an AI analyst prompt that:
+   - Infers likely normal baselines for the system
+   - Identifies deviations and control signals
+   - Distinguishes confirmed compromise from contextual risk
+   - Produces structured, analyst-ready findings
 
-These are evaluated with calibrated severity and used to provide investigative context.
+3. Certain high-confidence signals (for example, shell-owned outbound connections)
+   are enforced as primary findings to prevent dilution or minimization.
 
 ---
 
-## Severity Model
+## Example Finding (Sanitized)
 
-Severity is intentionally conservative and proportional:
+Example output excerpt (sanitized, representative only):
 
-- **HIGH**
-  - Live control paths (shell/interpreter network connections)
-  - Active compromise indicators
-- **MEDIUM**
-  - Persistence mechanisms
-  - Suspicious staging locations
-  - Potential footholds not directly tied to live control
-- **LOW**
-  - Hygiene issues
-  - Informational observations
-  - Environment characterization
+Severity: high  
+Category: network  
 
-The analyzer avoids severity inflation and duplicate findings.
+Evidence:  
+An established outbound TCP connection from an interactive shell process
+to a remote IP and port.
 
----
+Reasoning:  
+An outbound connection owned by an interactive shell strongly indicates
+live command execution or a reverse shell. This represents active external
+control until disproven.
 
-## Architecture Overview
-
-```
-collect.sh
-  - Gathers high-signal host telemetry
-  - Outputs a single compact JSON document
-
-analyze.py
-  - Enforces deterministic compromise detection
-  - Calls an LLM for contextual analysis
-  - Deduplicates findings and calibrates severity
-  - Produces IR-grade JSON output
-```
+Recommended next steps:
+1. Identify the process lineage (parent, ancestry, execution context)
+2. Inspect /proc metadata for the process
+3. Validate the remote endpoint and connection purpose
+4. Contain the host if required while preserving forensic state
 
 ---
 
-## Collected Telemetry
+## Common Use Cases
 
-The collector intentionally limits scope to high-value artifacts:
-
-- OS, kernel, uptime
-- Running processes (root + long-lived)
-- Network listeners
-- Established outbound network connections
-- Shell-owned outbound connections (explicitly flagged)
-- System and user cron jobs
-- `init.d` services and `rc.local`
-- UID 0 users and sudoers hashes
-- Executable artifacts in `/tmp` and `/dev/shm`
-- Package inventory summary (service-oriented focus)
-
-No full filesystem scans. No verbose logs.
-
----
-
-## Output Format
-
-The analyzer emits **strict JSON** suitable for IR workflows.
-
-### Sanitized Example Finding
-
-```json
-{
-  "severity": "high",
-  "category": "network",
-  "evidence": "tcp ESTAB local_host:54321 → remote_host:9003 users:((\"sh\",pid=XXXX))",
-  "reasoning": "Established outbound connection owned by an interactive shell indicates a live control channel consistent with reverse shell or command-and-control tradecraft.",
-  "recommended_next_step": "Identify the shell process and its parent, inspect process lineage, confirm the remote endpoint, and isolate the host."
-}
-```
-
-### Example Overall Structure
-
-```json
-{
-  "overall_assessment": "likely_compromised",
-  "confidence": 0.95,
-  "context_summary": [
-    "Host appears to be a developer workstation",
-    "No exposed server-style listeners detected",
-    "Python tooling and mounted filesystem usage observed"
-  ],
-  "high_risk_indicators": [
-    "Shell-owned outbound network connection"
-  ],
-  "findings": []
-}
-```
-
----
-
-## Usage
-
-Collect telemetry:
-
-```bash
-./collect.sh /var/tmp/ai_host_facts.json
-```
-
-Analyze:
-
-```bash
-python3 analyze.py /var/tmp/ai_host_facts.json
-```
-
----
-
-## Configuration
-
-Create a `.env` file:
-
-```
-OPENAI_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxx
-```
-
-Optional:
-
-```
-OPENAI_MODEL=gpt-4.1-mini
-OPENAI_BASE_URL=https://api.openai.com/v1
-```
-
----
-
-## Intended Use Cases
-
-- Incident response triage
 - Validation of suspected host compromise
+- Rapid IR triage prior to full forensic acquisition
 - Developer workstation investigations
-- WSL and container environment analysis
+- WSL and container-adjacent environment analysis
 - Post-breach host assessment
+- Confirmation of live command-and-control or reverse shells
+
+---
+
+## Output Philosophy
+
+HostTriageAI is intentionally conservative with severity:
+
+- High — strong indicators of active control or confirmed compromise
+- Medium — credible persistence or exposure risks requiring review
+- Low — contextual signals worth awareness, not escalation
+
+The tool is designed to avoid both false reassurance and unnecessary alarm.
 
 ---
 
 ## Disclaimer
 
-This tool is provided for defensive security and incident response purposes only.  
-All findings should be validated through additional investigation.
+This tool is provided for defensive security and incident response purposes only.
+
+All findings should be validated through additional investigation and corroborating evidence.
+HostTriageAI provides triage and judgment support, not final attribution or root cause analysis.
 
 ---
 
@@ -222,6 +110,10 @@ GNU General Public License v3.0 (GPL-3.0)
 
 ## Project Status
 
-Active development with emphasis on detection correctness, analyst usability, and disciplined severity handling.
+Active development, with emphasis on:
+- Detection correctness
+- Analyst usability
+- Disciplined severity handling
+- Avoidance of alert noise and hype-driven conclusions
 
 Security-focused feedback and contributions are welcome.
