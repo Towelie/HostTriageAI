@@ -232,15 +232,43 @@ No memory analysis, no forensic timelines, no lateral movement attribution.
 
 ```json
 {
+  "overall_assessment": "likely_compromised",
+  "confidence": 1.0,
+  "context_summary": [
+    "The host is running Ubuntu 20.04 LTS under WSL2 on a Windows environment.",
+    "The system has many standard packages installed, including container tooling and audit frameworks.",
+    "A local user is active and running interactive shell sessions.",
+    "There is a user-level cron job running a Python script on a recurring two-hour schedule.",
+    "Network listeners include a DNS service bound to a private address.",
+    "The system uses SSH with password authentication disabled, indicating key-based access.",
+    "The /tmp directory contains numerous user files consistent with Python package artifacts and development activity.",
+    "No unusual system-level persistence mechanisms (e.g., modified rc.local or abnormal init scripts) were detected.",
+    "Standard daily system cron jobs for maintenance and log rotation are present."
+  ],
+  "high_risk_indicators": [
+    "Shell interpreter owns an established outbound TCP connection",
+    "Outbound connection bound to interactive stdin/stdout file descriptors"
+  ],
   "findings": [
     {
       "severity": "high",
       "category": "network",
-      "evidence": "tcp     0        0           local_host:55742     remote_host:9003   users:((\"sh\",pid=1490,fd=2),(\"sh\",pid=1490,fd=1),(\"sh\",pid=1490,fd=0))",
-      "reasoning": "Established outbound connection owned by an interactive shell/interpreter (sh/bash/python/nc/socat/etc). This matches reverse shell / live C2 tradecraft and should be treated as active compromise until disproven.",
-      "recommended_next_step": "1) Identify PID and parent: ps -fp <pid>; ps -o pid,ppid,user,etime,cmd -p <pid>\n2) Inspect process tree: pstree -asp <pid>\n3) Inspect /proc: readlink -f /proc/<pid>/exe; tr '\\0' ' ' < /proc/<pid>/cmdline\n4) Confirm remote: ss -tunp | grep <pid>\n5) Contain: isolate network or kill -STOP <pid> (preserve forensics) then image if needed"
+      "evidence": "tcp 0 0 192.0.2.10:54321 198.51.100.25:9003 users:((\"sh\",pid=1234,fd=2),(\"sh\",pid=1234,fd=1),(\"sh\",pid=1234,fd=0))",
+      "reasoning": "An established outbound network connection is owned directly by a shell or interpreter process (e.g., sh/bash/python/nc/socat). Interactive shells do not normally initiate or maintain persistent outbound TCP connections. The presence of active stdin/stdout file descriptors strongly aligns with reverse shell or live command-and-control tradecraft, making benign explanations unlikely without additional context.",
+      "recommended_next_step": "1) Identify PID and parent: ps -fp <pid>; ps -o pid,ppid,user,etime,cmd -p <pid>\n2) Inspect process tree: pstree -asp <pid>\n3) Inspect /proc: readlink -f /proc/<pid>/exe; tr '\\0' ' ' < /proc/<pid>/cmdline\n4) Confirm remote endpoint: ss -tunp | grep <pid>\n5) Contain: isolate network or kill -STOP <pid> (preserve forensics), then acquire memory and disk images"
+    },
+    {
+      "severity": "medium",
+      "category": "persistence",
+      "evidence": "A user cron job runs a python3 script at /mnt/shared/example_task.py every 2 hours.",
+      "reasoning": "User-level cron jobs can be legitimate, but executing custom scripts from a mounted or shared directory is atypical and may represent a persistence mechanism. This warrants review to ensure it aligns with intended user activity and is not related to post-compromise persistence.",
+      "recommended_next_step": "Review the contents of /mnt/shared/example_task.py for suspicious behavior. Confirm the legitimacy of this cron job with the system owner or user."
     }
-  ]
+  ],
+  "verdict": {
+    "suspicious": true,
+    "why": "The system exhibits an active, established outbound TCP connection owned directly by a shell interpreter process. Shells do not normally maintain persistent network connections, particularly to non-standard ports, and the presence of interactive file descriptors strongly suggests remote interactive control. This pattern closely matches reverse shell or live command-and-control behavior and should be treated as active compromise until a benign explanation is conclusively verified."
+  }
 }
 ```
 

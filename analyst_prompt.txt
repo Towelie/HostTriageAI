@@ -55,7 +55,12 @@ OUTPUT STRICTLY AS JSON:
     "Short factual observations about the host environment"
   ],
 
-  "high_risk_indicators": ["..."],
+#  "high_risk_indicators": ["..."],
+   "high_risk_indicators": [
+     "Shell interpreter owns an established outbound TCP connection",
+     "Outbound connection bound to interactive stdin/stdout file descriptors",
+     "Outbound connection uses a non-standard destination port"
+   ]
 
   "findings": [
     {
