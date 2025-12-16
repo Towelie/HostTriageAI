@@ -132,9 +132,9 @@ HostTriageAI is intended to be run **on-demand** for point-in-time host assessme
 
 From the repository directory:
 
-\`\`\`bash
+```bash
 bash collect.sh ./host_facts.json
-\`\`\`
+```
 
 This generates a **single JSON snapshot** containing all collected telemetry.
 
