@@ -219,7 +219,7 @@ No memory analysis, no forensic timelines, no lateral movement attribution.
 ---
 
 ## Example high-severity finding (sanitized)
-
+```
     {
       "overall_assessment": "likely_compromised",
       "confidence": 1.0,
@@ -251,7 +251,7 @@ No memory analysis, no forensic timelines, no lateral movement attribution.
         "why": "The system exhibits an active outbound TCP connection owned by a shell interpreter with interactive file descriptors, strongly suggesting live remote control."
       }
     }
-
+```
 This class of finding should **override benign assumptions** and trigger immediate investigation.
 
 ---
