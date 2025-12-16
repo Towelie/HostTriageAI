@@ -1,4 +1,5 @@
 # HostTriageAI
+Demo: https://github.com/Towelie/HostTriageAI/issues/1#issue-3734113735
 
 ```mermaid
 flowchart TD
@@ -15,11 +16,6 @@ flowchart TD
     D --> E
     E --> F
 ```
-
-## Demo
-
-https://github.com/Towelie/HostTriageAI/issues/1#issue-3734113735
-
 
 **AI-assisted Linux host triage using high-signal telemetry**
 
