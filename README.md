@@ -18,11 +18,11 @@ flowchart TD
 
 **AI-assisted Linux host triage using high-signal telemetry**
 
-Modern attackers blend into normal system behavior, abuse legitimate tools, and rely on techniques that evade traditional signatures. Detection often fails not because indicators are absent, but because tools cannot explain *why* something matters or *what to do next*.
+Modern attackers blend into normal system behavior, abuse legitimate tools, and rely on techniques that evade traditional signatures. Detection often fails not because indicators are absent, but because tools cannot explain why something matters or what to do next.
 
-HostTriageAI combines **deterministic, policy-driven detection** with **analyst-grade AI reasoning** to transform raw Linux host telemetry into actionable incident response insight.
+HostTriageAI combines deterministic, policy-driven detection with analyst-grade AI reasoning to transform raw Linux host telemetry into actionable incident response insight.
 
-It is designed to support **fast, defensible decisions** during host-level triage.
+It is designed to support fast, defensible decisions during host-level triage.
 
 ---
 
@@ -91,7 +91,7 @@ It is designed to support **fast, defensible decisions** during host-level triag
 
 ## How this tool detects high-risk behavior
 
-HostTriageAI uses **deterministic IR gates** for conditions that should not be left to AI interpretation, including:
+HostTriageAI uses deterministic IR gates for conditions that should not be left to AI interpretation, including:
 
 - Shell or interpreter processes owning active network sockets
 - Interactive file descriptors (fd 0/1/2) redirected to network sockets
@@ -99,11 +99,13 @@ HostTriageAI uses **deterministic IR gates** for conditions that should not be l
 - Shell-backed reverse or bind shells
 
 These detections:
+
 - Override benign assumptions
 - Override AI uncertainty
 - Force a high-confidence compromise verdict unless disproven
 
 The AI is then used to:
+
 - Explain attacker tradecraft
 - Correlate secondary indicators
 - Recommend concrete next investigative steps
@@ -126,17 +128,15 @@ No ATT&CK mapping is emitted without a concrete behavioral basis.
 
 ## How to use this tool
 
-HostTriageAI is intended to be run **on-demand** for point-in-time host assessment.
+HostTriageAI is intended to be run on-demand for point-in-time host assessment.
 
 ### 1. Run the collector on the target host
 
 From the repository directory:
 
-```bash
-bash collect.sh ./host_facts.json
-```
+    bash collect.sh ./host_facts.json
 
-This generates a **single JSON snapshot** containing all collected telemetry.
+This generates a single JSON snapshot containing all collected telemetry.
 
 The collector:
 - Does not modify system state
@@ -144,23 +144,15 @@ The collector:
 - Is safe to run on live systems
 - Intentionally limits output size
 
----
-
 ### 2. Run the analyzer locally
 
 Once the facts file is generated:
 
-\`\`\`bash
-python3 analyze.py ./host_facts.json
-\`\`\`
+    python3 analyze.py ./host_facts.json
 
 You should redirect output to a file during investigations:
 
-\`\`\`bash
-python3 analyze.py ./host_facts.json > findings.json
-\`\`\`
-
----
+    python3 analyze.py ./host_facts.json > findings.json
 
 ### 3. Interpret the findings
 
@@ -191,6 +183,7 @@ Findings are designed to be:
 ## Intended use cases
 
 ### Incident response triage (single host)
+
 - Rapid assessment during suspected compromise
 - Identify:
   - Active reverse shells
@@ -202,29 +195,64 @@ Findings are designed to be:
 Limitations:  
 No memory analysis, no forensic timelines, no lateral movement attribution.
 
----
-
 ### Threat hunting (hypothesis-driven)
+
 - Validate focused questions such as:
   - Is there an interactive shell with network access?
   - Is anything persisting that should not be?
   - Are temp directories used for execution?
 
----
-
 ### Suspicious host validation
+
 - Cloud instances
 - CI runners
 - Jump boxes
 - Ephemeral or purpose-built systems
 
----
-
 ### Post-alert enrichment
+
 - Add host-level context to:
   - SIEM alerts
   - Firewall detections
   - Cloud security events
+
+---
+
+## Example high-severity finding (sanitized)
+
+    {
+      "overall_assessment": "likely_compromised",
+      "confidence": 1.0,
+      "context_summary": [
+        "The host is running Ubuntu 20.04 LTS under WSL2 on a Windows environment.",
+        "The system has many standard packages installed, including container tooling and audit frameworks.",
+        "A local user is active and running interactive shell sessions.",
+        "There is a user-level cron job running a Python script on a recurring two-hour schedule.",
+        "Network listeners include a DNS service bound to a private address.",
+        "The system uses SSH with password authentication disabled, indicating key-based access.",
+        "The /tmp directory contains numerous user files consistent with Python package artifacts and development activity.",
+        "No unusual system-level persistence mechanisms were detected."
+      ],
+      "high_risk_indicators": [
+        "Shell interpreter owns an established outbound TCP connection",
+        "Outbound connection bound to interactive stdin/stdout file descriptors"
+      ],
+      "findings": [
+        {
+          "severity": "high",
+          "category": "network",
+          "evidence": "tcp 0 0 192.0.2.10:54321 198.51.100.25:9003 users:((\"sh\",pid=1234,fd=2),(\"sh\",pid=1234,fd=1),(\"sh\",pid=1234,fd=0))",
+          "reasoning": "An established outbound network connection is owned directly by a shell interpreter process. Interactive shells do not normally maintain persistent outbound connections. The presence of interactive file descriptors strongly aligns with reverse shell or live command-and-control tradecraft.",
+          "recommended_next_step": "Identify the process tree, confirm socket ownership, contain the host, and preserve forensic state."
+        }
+      ],
+      "verdict": {
+        "suspicious": true,
+        "why": "The system exhibits an active outbound TCP connection owned by a shell interpreter with interactive file descriptors, strongly suggesting live remote control."
+      }
+    }
+
+This class of finding should **override benign assumptions** and trigger immediate investigation.
 
 ---
 
